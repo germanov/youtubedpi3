@@ -1,0 +1,45 @@
+name: Build YouTube Dostupen v3.0 APK
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack v3.0
+        run: unzip -o YouTubeDostupen-v3.zip
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Compile ciadpi and tun2socks
+        run: |
+          set -e
+          PROJECT_DIR=$(dirname "$(find . -name 'settings.gradle.kts' | head -n 1)")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+          NDK_DIR="${ANDROID_NDK_LATEST_HOME:-$(ls -d "$ANDROID_HOME"/ndk/* 2>/dev/null | sort -V | tail -n 1)}"
+          CC_BIN="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+          OUT_DIR="${{ github.workspace }}/$PROJECT_DIR/app/src/main/jniLibs/arm64-v8a"
+          mkdir -p "$OUT_DIR"
+          git clone --depth 1 https://github.com/hufrea/byedpi.git /tmp/byedpi
+          make -C /tmp/byedpi CC="$CC_BIN"
+          cp /tmp/byedpi/ciadpi "$OUT_DIR/libciadpi.so"
+          mkdir -p /tmp/hev && cd /tmp/hev
+          git clone --recursive --depth 1 https://github.com/heiher/hev-socks5-tunnel.git jni
+          printf "\nAPP_ABI := arm64-v8a\nAPP_PLATFORM := android-24\nAPP_CFLAGS += -DPKGNAME=com/youtubetunnel/vpn -DCLSNAME=TProxyService\n" >> jni/Application.mk
+          "$NDK_DIR/ndk-build" -j$(nproc)
+          cp libs/arm64-v8a/libhev-socks5-tunnel.so "$OUT_DIR/"
+      - name: Build APK
+        run: |
+          cd "${{ github.workspace }}/$PROJECT_DIR"
+          gradle assembleDebug
+          mkdir -p "${{ github.workspace }}/apk_out"
+          cp app/build/outputs/apk/debug/app-debug.apk "${{ github.workspace }}/apk_out/app-debug.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: YouTubeDostupen-v3.0-APK
+          path: apk_out/app-debug.apk
